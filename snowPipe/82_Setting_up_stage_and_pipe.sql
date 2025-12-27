@@ -20,7 +20,7 @@ CREATE OR REPLACE file format MANAGE_DB.file_formats.csv_fileformat
     
  // Create stage object with integration object & file format object
 CREATE OR REPLACE stage MANAGE_DB.external_stages.csv_folder
-    URL = 's3://snowflakes3bucket123/csv/snowpipe'
+    URL = 's3://snowflake-buck01/csv/snowpipe'
     STORAGE_INTEGRATION = s3_int
     FILE_FORMAT = MANAGE_DB.file_formats.csv_fileformat;
    
@@ -42,4 +42,5 @@ FROM @MANAGE_DB.external_stages.csv_folder ;
 // Describe pipe
 DESC pipe employee_pipe;
     
+
 SELECT * FROM OUR_FIRST_DB.PUBLIC.employees ;
