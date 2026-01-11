@@ -82,7 +82,8 @@ SELECT * FROM HR_DWH.BRONZE.EMP_RAW;
 -- CREATE Department table in BRONZE Layer
 CREATE OR REPLACE TABLE HR_DWH.BRONZE.DEPT_RAW (
     department_id INT,
-    department_name STRING
+    department_name STRING,
+    created_at timestamp
 );
 
 -- Load Bronze Data
@@ -91,11 +92,14 @@ COPY INTO HR_DWH.BRONZE.DEPT_RAW
     file_format= (type = csv field_delimiter=',' skip_header=1, TIMESTAMP_FORMAT = 'YYYY/MM/DD HH24:MI:SS.FF3')
     files = ('dept.csv');
 
+SELECT * FROM HR_DWH.BRONZE.DEPT_RAW;
+
 -- 3. Silver Layer (Clean & Conformed)
 CREATE OR REPLACE TABLE SILVER.DIM_DEPT AS
 SELECT DISTINCT
     department_id,
-    department_name
+    department_name,
+    created_at
 FROM HR_DWH.BRONZE.DEPT_RAW
 WHERE department_id IS NOT NULL;
 
@@ -120,6 +124,8 @@ WHERE EMPLOYEE_ID IS NOT NULL;
 ALTER TABLE SILVER.FACT_EMP
 ADD CONSTRAINT pk_emp PRIMARY KEY (employee_id);
 
+SELECT * FROM HR_DWH.BRONZE.DEPT_RAW;
+
 -- 4. Gold Layer (Analytics & Reporting)
 CREATE OR REPLACE DYNAMIC TABLE GOLD.DEPT_HIGHEST_SALARY
 TARGET_LAG = '5 minutes'
@@ -136,7 +142,7 @@ GROUP BY
     d.department_id,
     d.department_name;
 
--- Table Status verification
+-- DATA Analysis
 ALTER DYNAMIC TABLE GOLD.DEPT_HIGHEST_SALARY
 SET TARGET_LAG = '10 minutes';
 
@@ -157,3 +163,5 @@ SELECT
     state
 FROM SNOWFLAKE.ACCOUNT_USAGE.DYNAMIC_TABLES
 WHERE name = 'DEPT_HIGHEST_SALARY';
+
+
