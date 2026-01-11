@@ -1,1 +1,138 @@
+--1. Create Database, Schema, Warehouse
+CREATE OR REPLACE DATABASE HR_DWH;
+
+CREATE OR REPLACE SCHEMA HR_DWH.BRONZE;
+CREATE OR REPLACE SCHEMA HR_DWH.SILVER;
+CREATE OR REPLACE SCHEMA HR_DWH.GOLD;
+
+CREATE OR REPLACE WAREHOUSE HR_WH
+WAREHOUSE_SIZE = XSMALL
+AUTO_SUSPEND = 300
+AUTO_RESUME = TRUE;
+ -- OR
+CREATE WAREHOUSE HR_WH
+WITH WAREHOUSE_SIZE = 'SMALL'
+WAREHOUSE_TYPE = 'STANDARD' 
+AUTO_SUSPEND = 300 
+AUTO_RESUME = TRUE 
+MIN_CLUSTER_COUNT = 1 
+MAX_CLUSTER_COUNT = 1 
+SCALING_POLICY = 'STANDARD';
+
+USE DATABASE HR_DWH;
+USE WAREHOUSE HR_WH;
+
+/*
+-- BRONZE Layer (Raw Ingestion)
+CREATE OR REPLACE FILE FORMAT csv_ff
+TYPE = CSV
+SKIP_HEADER = 1
+FIELD_OPTIONALLY_ENCLOSED_BY = '"';
+
+CREATE OR REPLACE STAGE hr_stage
+FILE_FORMAT = csv_ff;
+
+*/
+-- Pull Data from S3 Bucket 
+CREATE OR REPLACE STAGE HR_DWH.RAW.aws_stage
+    url='s3://snowflake-buck01/raw/'
+    STORAGE_INTEGRATION = s3_int;
+    --credentials=(aws_key_id='xyz_DUMMY_ID' aws_secret_key='1234abcd_key');
+
+
+ALTER STAGE aws_stage
+    SET credentials=(aws_key_id='XYZ_DUMMY_ID' aws_secret_key='987xyz');
+
+DESC STORAGE INTEGRATION s3_int;
+
+
+LIST @HR_DWH.RAW.aws_stage
+
+DESC STAGE HR_DWH.RAW.aws_stage; 
+
+
+--Bronze Tables
+// Copy command with specified file(s)
+SELECT $1 AS EMPLOYEE_ID, $2 AS FIRST_NAME, $3 AS LAST_NAME, $4 AS EMAIL, $5 AS PHONE_NUMBER,
+$6 AS HIRE_DATE, $7 AS JOB_ID, $8 AS SALARY, $9 AS COMMISSION_PCT, $10 AS MANAGER_ID, $11 AS DEPARTMENT_ID
+FROM @HR_DWH.RAW.aws_stage s
+
+-- CREATE EMP table in BRONZE Layer
+CREATE OR REPLACE TABLE HR_DWH.BRONZE.EMP_RAW (
+    EMPLOYEE_ID INT,
+    FIRST_NAME VARCHAR(60),
+    LAST_NAME VARCHAR(60),
+    EMAIL VARCHAR(60),
+    PHONE_NUMBER VARCHAR(30),
+    HIRE_DATE TIMESTAMP,
+    JOB_ID VARCHAR(30),
+    SALARY INT,
+    COMMISSION_PCT DECIMAL(6,2),
+    MANAGER_ID INT,
+    DEPARTMENT_ID INT);
+    
+-- Load Bronze Data into EMP TABLE
+COPY INTO HR_DWH.BRONZE.EMP_RAW
+    FROM @HR_DWH.RAW.aws_stage
+    file_format= (type = csv field_delimiter=',' skip_header=1, TIMESTAMP_FORMAT = 'YYYY/MM/DD HH24:MI:SS.FF3')
+    files = ('emp.csv');
+
+SELECT * FROM HR_DWH.BRONZE.EMP_RAW;
+
+-- CREATE Department table in BRONZE Layer
+CREATE OR REPLACE TABLE HR_DWH.BRONZE.DEPT_RAW (
+    department_id INT,
+    department_name STRING
+);
+
+-- Load Bronze Data
+COPY INTO HR_DWH.BRONZE.DEPT_RAW
+    FROM @HR_DWH.RAW.aws_stage
+    file_format= (type = csv field_delimiter=',' skip_header=1, TIMESTAMP_FORMAT = 'YYYY/MM/DD HH24:MI:SS.FF3')
+    files = ('dept.csv');
+
+-- 3. Silver Layer (Clean & Conformed)
+CREATE OR REPLACE TABLE SILVER.DIM_DEPT AS
+SELECT DISTINCT
+    department_id,
+    department_name
+FROM HR_DWH.BRONZE.DEPT_RAW
+WHERE department_id IS NOT NULL;
+
+-- Silver Employee (Fact-like)
+CREATE OR REPLACE TABLE SILVER.FACT_EMP AS
+SELECT
+    EMPLOYEE_ID,
+    FIRST_NAME ,
+    LAST_NAME,
+    EMAIL,
+    PHONE_NUMBER,
+    HIRE_DATE,
+    JOB_ID,
+    SALARY,
+    COMMISSION_PCT,
+    MANAGER_ID ,
+    DEPARTMENT_ID
+FROM HR_DWH.BRONZE.EMP_RAW
+WHERE EMPLOYEE_ID IS NOT NULL;
+
+-- Add Logical Constraints
+ALTER TABLE SILVER.FACT_EMP
+ADD CONSTRAINT pk_emp PRIMARY KEY (employee_id);
+
+-- 4. Gold Layer (Analytics & Reporting)
+CREATE OR REPLACE DYNAMIC TABLE GOLD.DEPT_HIGHEST_SALARY
+TARGET_LAG = '5 minutes'
+WAREHOUSE = HR_WH
+AS
+SELECT
+    d.department_id,
+    d.department_name,
+    MAX(e.salary) AS highest_salary
+FROM SILVER.FACT_EMP e
+JOIN SILVER.DIM_DEPT d
+  ON e.department_id = d.department_id
+GROUP BY
+    d.department_id,
+    d.department_name;
 
